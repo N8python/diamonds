@@ -300,9 +300,9 @@ async function main() {
     gui.add(effectController, "correctMips");
 
     function animate() {
-        /* diamond.material.uniforms.bounces.value = effectController.bounces;
-         diamond.material.uniforms.ior.value = effectController.ior;
-         diamond.material.uniforms.correctMips.value = effectController.correctMips;*/
+        diamond.material.uniforms.bounces.value = effectController.bounces;
+        diamond.material.uniforms.ior.value = effectController.ior;
+        diamond.material.uniforms.correctMips.value = effectController.correctMips;
         renderer.setRenderTarget(defaultTexture);
         renderer.clear();
         renderer.render(scene, camera);
