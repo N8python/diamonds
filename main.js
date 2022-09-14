@@ -130,6 +130,8 @@ async function main() {
                     correctMips: { value: true },
                     projectionMatrixInv: { value: camera.projectionMatrixInverse },
                     viewMatrixInv: { value: camera.matrixWorld },
+                    chromaticAberration: { value: true },
+                    aberrationStrength: { value: 0.01 },
                     resolution: { value: new THREE.Vector2(clientWidth, clientHeight) }
                 },
                 vertexShader: /*glsl*/ `
@@ -155,17 +157,15 @@ async function main() {
             uniform float ior;
             uniform vec3 color;
             uniform bool correctMips;
+            uniform bool chromaticAberration;
             uniform mat4 projectionMatrixInv;
             uniform mat4 viewMatrixInv;
             uniform vec2 resolution;
-            void main() {
-                vec2 uv = gl_FragCoord.xy / resolution;
-                vec3 directionCamPerfect = (projectionMatrixInv * vec4(uv * 2.0 - 1.0, 0.0, 1.0)).xyz;
-                directionCamPerfect = (viewMatrixInv * vec4(directionCamPerfect, 0.0)).xyz;
-                directionCamPerfect = normalize(directionCamPerfect);
-                vec3 normal = vNormal;
-                vec3 rayOrigin = vec3(cameraPosition);
-                vec3 rayDirection = normalize(vWorldPosition - cameraPosition);
+            uniform bool chromaticAbberation;
+            uniform float aberrationStrength;
+            vec3 totalInternalReflection(vec3 ro, vec3 rd, vec3 normal, float ior) {
+                vec3 rayOrigin = ro;
+                vec3 rayDirection = rd;
                 rayDirection = refract(rayDirection, normal, 1.0 / ior);
                 rayOrigin = vWorldPosition + rayDirection * 0.001;
                 for(float i = 0.0; i < bounces; i++) {
@@ -185,7 +185,30 @@ async function main() {
                     rayDirection = reflect(rayDirection, faceNormal);
                     rayOrigin = hitPos + rayDirection * 0.01;
                 }
-                vec3 finalColor = textureGrad(envMap, rayDirection, dFdx(correctMips ? directionCamPerfect: rayDirection), dFdy(correctMips ? directionCamPerfect: rayDirection)).rgb * color;
+                return rayDirection;
+            }
+            void main() {
+                vec2 uv = gl_FragCoord.xy / resolution;
+                vec3 directionCamPerfect = (projectionMatrixInv * vec4(uv * 2.0 - 1.0, 0.0, 1.0)).xyz;
+                directionCamPerfect = (viewMatrixInv * vec4(directionCamPerfect, 0.0)).xyz;
+                directionCamPerfect = normalize(directionCamPerfect);
+                vec3 normal = vNormal;
+                vec3 rayOrigin = vec3(cameraPosition);
+                vec3 rayDirection = normalize(vWorldPosition - cameraPosition);
+                vec3 finalColor;
+                if (chromaticAberration) {
+                vec3 rayDirectionR = totalInternalReflection(rayOrigin, rayDirection, normal, max(ior * (1.0 - aberrationStrength), 1.0));
+                vec3 rayDirectionG = totalInternalReflection(rayOrigin, rayDirection, normal, max(ior, 1.0));
+                vec3 rayDirectionB = totalInternalReflection(rayOrigin, rayDirection, normal, max(ior * (1.0 + aberrationStrength), 1.0));
+                float finalColorR = textureGrad(envMap, rayDirectionR, dFdx(correctMips ? directionCamPerfect: rayDirection), dFdy(correctMips ? directionCamPerfect: rayDirection)).r;
+                float finalColorG = textureGrad(envMap, rayDirectionG, dFdx(correctMips ? directionCamPerfect: rayDirection), dFdy(correctMips ? directionCamPerfect: rayDirection)).g;
+                float finalColorB = textureGrad(envMap, rayDirectionB, dFdx(correctMips ? directionCamPerfect: rayDirection), dFdy(correctMips ? directionCamPerfect: rayDirection)).b;
+                finalColor = vec3(finalColorR, finalColorG, finalColorB) * color;
+                } else {
+                    rayDirection = totalInternalReflection(rayOrigin, rayDirection, normal, max(ior, 1.0));
+                    finalColor = textureGrad(envMap, rayDirection, dFdx(correctMips ? directionCamPerfect: rayDirection), dFdy(correctMips ? directionCamPerfect: rayDirection)).rgb;
+                    finalColor *= color;
+                }
                 gl_FragColor = vec4(vec3(finalColor), 1.0);
             }
             `
@@ -292,17 +315,23 @@ async function main() {
     const effectController = {
         bounces: 3.0,
         ior: 2.4,
-        correctMips: true
+        correctMips: true,
+        chromaticAberration: true,
+        aberrationStrength: 0.01
     };
     const gui = new GUI();
     gui.add(effectController, "bounces", 1.0, 10.0, 1.0).name("Bounces");
     gui.add(effectController, "ior", 1.0, 5.0, 0.01).name("IOR");
     gui.add(effectController, "correctMips");
+    gui.add(effectController, "chromaticAberration");
+    gui.add(effectController, "aberrationStrength", 0.00, 1.0, 0.0001).name("Aberration Strength");
 
     function animate() {
         diamond.material.uniforms.bounces.value = effectController.bounces;
         diamond.material.uniforms.ior.value = effectController.ior;
         diamond.material.uniforms.correctMips.value = effectController.correctMips;
+        diamond.material.uniforms.chromaticAberration.value = effectController.chromaticAberration;
+        diamond.material.uniforms.aberrationStrength.value = effectController.aberrationStrength;
         renderer.setRenderTarget(defaultTexture);
         renderer.clear();
         renderer.render(scene, camera);
